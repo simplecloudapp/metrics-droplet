@@ -1,0 +1,84 @@
+[versions]
+kotlin = "2.0.20"
+kotlin-coroutines = "1.9.0"
+shadow = "8.1.1"
+log4j = "2.22.0"
+slf4j = "2.0.16"
+protobuf = "3.25.2"
+grpc = "1.61.0"
+grpc-kotlin = "1.4.1"
+simplecloud-droplet-api = "0.0.1-dev.66efe83"
+simplecloud-metrics = "1.0.0"
+simplecloud-pubsub = "1.0.5"
+simplecloud-proto-specs = "1.4.1.1.20241130092612.4a24f8afd7aa"
+commons-io = "2.15.1"
+clikt = "5.0.1"
+jooq = "3.19.3"
+sqlite-jdbc = "3.44.1.0"
+sonatype-central-portal-publisher = "1.2.3"
+
+
+[libraries]
+kotlin-jvm = { module = "org.jetbrains.kotlin:kotlin-stdlib-jdk8", version.ref = "kotlin" }
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+kotlin-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlin-coroutines" }
+
+log4j-core = { module = "org.apache.logging.log4j:log4j-core", version.ref = "log4j" }
+log4j-api = { module = "org.apache.logging.log4j:log4j-api", version.ref = "log4j" }
+log4j-slf4j = { module = "org.apache.logging.log4j:log4j-slf4j-impl", version.ref = "log4j" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+
+protobuf-kotlin = { module = "com.google.protobuf:protobuf-kotlin", version.ref = "protobuf" }
+
+grpc-stub = { module = "io.grpc:grpc-stub", version.ref = "grpc" }
+grpc-kotlin-stub = { module = "io.grpc:grpc-kotlin-stub", version.ref = "grpc-kotlin" }
+grpc-protobuf = { module = "io.grpc:grpc-protobuf", version.ref = "grpc" }
+grpc-netty-shaded = { module = "io.grpc:grpc-netty-shaded", version.ref = "grpc" }
+
+simplecloud-droplet-api = { module = "app.simplecloud.droplet.api:droplet-api", version.ref = "simplecloud-droplet-api" }
+simplecloud-metrics = { module = "app.simplecloud:internal-metrics-api", version.ref = "simplecloud-metrics" }
+simplecloud-pubsub = { module = "app.simplecloud:simplecloud-pubsub", version.ref = "simplecloud-pubsub" }
+simplecloud-proto-specs = { module = "build.buf.gen:simplecloud_proto-specs_grpc_kotlin", version.ref = "simplecloud-proto-specs" }
+
+commons-io = { module = "commons-io:commons-io", version.ref = "commons-io" }
+
+clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
+
+jooq = { module = "org.jooq:jooq-kotlin", version.ref = "jooq" }
+jooq-meta = { module = "org.jooq:jooq-meta", version.ref = "jooq" }
+jooq-meta-extensions = { module = "org.jooq:jooq-meta-extensions", version.ref = "jooq" }
+jooq-postgres = { module = "org.jooq:jooq-postgres-extensions", version.ref = "jooq" }
+jooq-kotlin-coroutines = { module = "org.jooq:jooq-kotlin-coroutines", version.ref = "jooq" }
+
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
+
+[bundles]
+log4j = [
+    "log4j-core",
+    "log4j-api",
+    "log4j-slf4j",
+    "slf4j-api",
+    "slf4j-simple",
+]
+jooq = [
+    "jooq",
+    "jooq-meta",
+    "jooq-meta-extensions",
+    "jooq-postgres",
+    "jooq-kotlin-coroutines",
+]
+proto = [
+    "protobuf-kotlin",
+    "grpc-stub",
+    "grpc-kotlin-stub",
+    "grpc-protobuf",
+    "grpc-netty-shaded",
+    "simplecloud-proto-specs",
+]
+
+[plugins]
+kotlin = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+shadow = { id = "com.github.johnrengelman.shadow", version.ref = "shadow" }
+jooq-codegen = { id = "org.jooq.jooq-codegen-gradle", version.ref = "jooq" }
+sonatype-central-portal-publisher = { id = "net.thebugmc.gradle.sonatype-central-portal-publisher", version.ref = "sonatype-central-portal-publisher" }
