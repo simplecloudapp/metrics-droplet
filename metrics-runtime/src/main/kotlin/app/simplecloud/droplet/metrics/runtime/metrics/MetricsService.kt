@@ -27,7 +27,7 @@ class MetricsService(
     }
 
     private fun getFrom(request: GetMetricsRequest): LocalDateTime? {
-        return if (request.from.seconds == 0L && request.from.nanos.toLong() == 0L) {
+        return if (request.from.seconds <= 0L && request.from.nanos.toLong() <= 0L) {
             null
         } else {
             ProtobufTimestamp.toLocalDateTime(request.from)
@@ -35,7 +35,7 @@ class MetricsService(
     }
 
     private fun getTo(request: GetMetricsRequest): LocalDateTime? {
-        return if (request.to.seconds == 0L && request.to.nanos.toLong() == 0L) {
+        return if (request.to.seconds <= 0L && request.to.nanos.toLong() <= 0L) {
             null
         } else {
             ProtobufTimestamp.toLocalDateTime(request.to)

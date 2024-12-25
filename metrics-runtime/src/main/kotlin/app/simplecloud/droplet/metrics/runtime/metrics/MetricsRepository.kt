@@ -102,16 +102,25 @@ class MetricsRepository(
             METRICS.TIME.lessOrEqual(to)
         }
 
-        return database.context.select()
+        println("Infos: $whereCondition $fromCondition $toCondition")
+
+        val query = database.context.select()
             .from(METRICS)
             .join(METRICS_META)
             .on(METRICS_META.METRIC_UNIQUE_ID.eq(METRICS.UNIQUE_ID))
             .where(whereCondition)
             .and(fromCondition)
             .and(toCondition)
+
+        println(query.sql)
+
+        return query
             .asFlow()
             .toCollection(mutableListOf())
-            .groupBy { record -> record.get(METRICS.UNIQUE_ID) }
+            .groupBy { record ->
+                println(record.get(METRICS.UNIQUE_ID))
+                record.get(METRICS.UNIQUE_ID)
+            }
             .map { (uniqueId, records) ->
                 val firstRecord = records.first()
                 val metaData = records.associate {

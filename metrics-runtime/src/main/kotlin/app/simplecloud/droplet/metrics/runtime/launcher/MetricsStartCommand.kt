@@ -20,12 +20,17 @@ class MetricsStartCommand(
     val databaseUrl: String by option(help = "Database URL (default: ${defaultDatabaseUrl})", envvar = "DATABASE_URL")
         .default(defaultDatabaseUrl)
 
-    val grpcHost: String by option(help = "Grpc host (default: localhost)", envvar = "GRPC_HOST").default("localhost")
+    val grpcHost: String by option(help = "Grpc host (default: 127.0.0.1)", envvar = "GRPC_HOST").default("127.0.0.1")
     val grpcPort: Int by option(help = "Grpc port (default: 5836)", envvar = "GRPC_PORT").int().default(5836)
 
-    val pubSubGrpcHost: String by option(help = "Grpc host (default: localhost)", envvar = "GRPC_HOST").default("localhost")
+    val pubSubGrpcHost: String by option(help = "Grpc host (default: 127.0.0.1)", envvar = "PUBSUB_GRPC_HOST").default("127.0.0.1")
     val pubSubGrpcPort: Int by option(help = "PubSub Grpc port (default: 5817)", envvar = "PUBSUB_GRPC_PORT").int()
         .default(5817)
+
+
+    val controllerGrpcHost: String by option(help = "Grpc host (default: 127.0.0.1)", envvar = "CONTROLLER_GRPC_HOST").default("127.0.0.1")
+    val controllerGrpcPort: Int by option(help = "PubSub Grpc port (default: 5816)", envvar = "CONTROLLER_GRPC_PORT").int()
+        .default(5816)
 
     private val authSecretPath: Path by option(
         help = "Path to auth secret file (default: .auth.secret)",
@@ -37,7 +42,7 @@ class MetricsStartCommand(
     val authSecret: String by option(help = "Auth secret", envvar = "AUTH_SECRET_KEY")
         .defaultLazy { Files.readString(authSecretPath) }
 
-    val authorizationHost: String by option(help = "Authorization host (default: localhost)", envvar = "AUTHORIZATION_HOST").default("localhost")
+    val authorizationHost: String by option(help = "Authorization host (default: 127.0.0.1)", envvar = "AUTHORIZATION_HOST").default("127.0.0.1")
 
     val authorizationPort: Int by option(
         help = "Authorization port (default: 5818)",

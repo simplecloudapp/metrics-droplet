@@ -8,7 +8,9 @@ import app.simplecloud.droplet.metrics.runtime.metrics.MetricsRepository
 import app.simplecloud.droplet.metrics.runtime.metrics.MetricsService
 import app.simplecloud.droplet.metrics.shared.MetricsEventNames
 import app.simplecloud.pubsub.PubSubClient
+import build.buf.gen.simplecloud.controller.v1.ControllerDropletServiceGrpcKt
 import build.buf.gen.simplecloud.metrics.v1.Metric
+import io.grpc.ManagedChannelBuilder
 import io.grpc.Server
 import io.grpc.ServerBuilder
 import kotlinx.coroutines.CoroutineScope
@@ -22,10 +24,19 @@ class MetricsRuntime(
 ) {
 
     private val logger = LogManager.getLogger(MetricsRuntime::class.java)
+    private val authCallCredentials = AuthCallCredentials(metricsStartCommand.authSecret)
     private val database = DatabaseFactory.createDatabase(metricsStartCommand.databaseUrl)
 
     private val repository = MetricsRepository(database)
     private val server = createGrpcServer()
+
+    private val controllerChannel =
+        ManagedChannelBuilder.forAddress(metricsStartCommand.controllerGrpcHost, metricsStartCommand.controllerGrpcPort).usePlaintext()
+            .build()
+
+    private val controllerDropletStub =
+        ControllerDropletServiceGrpcKt.ControllerDropletServiceCoroutineStub(controllerChannel)
+            .withCallCredentials(authCallCredentials)
 
     private val pubSubClient = PubSubClient(
         metricsStartCommand.pubSubGrpcHost,
@@ -37,6 +48,7 @@ class MetricsRuntime(
         logger.info("Starting metrics runtime")
         setupDatabase()
         startGrpcServer()
+        attach()
         subscribeToMetricsEvents()
 
         suspendCancellableCoroutine<Unit> { continuation ->
@@ -47,6 +59,13 @@ class MetricsRuntime(
                 }
             })
         }
+    }
+
+    private fun attach() {
+        logger.info("Attaching to controller...")
+        val attacher =
+            Attacher(metricsStartCommand, controllerChannel, controllerDropletStub)
+        attacher.enforceAttach()
     }
 
     private fun setupDatabase() {

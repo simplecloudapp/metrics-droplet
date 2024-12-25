@@ -7,10 +7,9 @@ slf4j = "2.0.16"
 protobuf = "3.25.2"
 grpc = "1.61.0"
 grpc-kotlin = "1.4.1"
-simplecloud-droplet-api = "0.0.1-dev.66efe83"
+simplecloud-droplet-api = "0.0.1-dev.cf07a34"
 simplecloud-metrics = "1.0.0"
 simplecloud-pubsub = "1.0.5"
-simplecloud-proto-specs = "1.4.1.1.20241130092612.4a24f8afd7aa"
 commons-io = "2.15.1"
 clikt = "5.0.1"
 jooq = "3.19.3"
@@ -39,7 +38,6 @@ grpc-netty-shaded = { module = "io.grpc:grpc-netty-shaded", version.ref = "grpc"
 simplecloud-droplet-api = { module = "app.simplecloud.droplet.api:droplet-api", version.ref = "simplecloud-droplet-api" }
 simplecloud-metrics = { module = "app.simplecloud:internal-metrics-api", version.ref = "simplecloud-metrics" }
 simplecloud-pubsub = { module = "app.simplecloud:simplecloud-pubsub", version.ref = "simplecloud-pubsub" }
-simplecloud-proto-specs = { module = "build.buf.gen:simplecloud_proto-specs_grpc_kotlin", version.ref = "simplecloud-proto-specs" }
 
 commons-io = { module = "commons-io:commons-io", version.ref = "commons-io" }
 
@@ -74,7 +72,6 @@ proto = [
     "grpc-kotlin-stub",
     "grpc-protobuf",
     "grpc-netty-shaded",
-    "simplecloud-proto-specs",
 ]
 
 [plugins]
