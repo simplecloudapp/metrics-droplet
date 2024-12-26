@@ -44,12 +44,12 @@ jobs:
         id: commit_hash
         run: echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
-      - name: Publish to SimpleCloud Repository
-        run: ./gradlew publishMavenJavaPublicationToSimplecloudRepository
-        env:
-          COMMIT_HASH: ${{ env.COMMIT_HASH }}
-          SIMPLECLOUD_USERNAME: ${{ secrets.SIMPLECLOUD_USERNAME }}
-          SIMPLECLOUD_PASSWORD: ${{ secrets.SIMPLECLOUD_PASSWORD }}
+#      - name: Publish to SimpleCloud Repository
+#        run: ./gradlew publishMavenJavaPublicationToSimplecloudRepository
+#        env:
+#          COMMIT_HASH: ${{ env.COMMIT_HASH }}
+#          SIMPLECLOUD_USERNAME: ${{ secrets.SIMPLECLOUD_USERNAME }}
+#          SIMPLECLOUD_PASSWORD: ${{ secrets.SIMPLECLOUD_PASSWORD }}
 
       - name: Create Release
         id: create_release
@@ -65,17 +65,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-#      - name: Upload ShadowJars to Release
-#        run: |
-#          # Find JAR files in any submodule's build/libs directory
-#          for jar in $(find . -type f -name "*.jar" -path "*/build/libs/*.jar" -not -path "./build/libs/*"); do
-#          # Check if the filename contains a version number (e.g., a dash followed by numbers)
-#            if [[ $(basename "$jar") =~ -[0-9]+\.[0-9]+ ]]; then
-#              echo "Skipping $jar due to version number"
-#            else
-#              echo "Uploading $jar"
-#              gh release upload v${{ env.GRADLE_VERSION }}-dev.${{ env.COMMIT_HASH }} "$jar"
-#            fi
-#          done
-#        env:
-#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload ShadowJars to Release
+        run: |
+          # Find JAR files in any submodule's build/libs directory
+          for jar in $(find . -type f -name "*.jar" -path "*/build/libs/*.jar" -not -path "./build/libs/*"); do
+          # Check if the filename contains a version number (e.g., a dash followed by numbers)
+            if [[ $(basename "$jar") =~ -[0-9]+\.[0-9]+ ]]; then
+              echo "Skipping $jar due to version number"
+            else
+              echo "Uploading $jar"
+              gh release upload v${{ env.GRADLE_VERSION }}-dev.${{ env.COMMIT_HASH }} "$jar"
+            fi
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
