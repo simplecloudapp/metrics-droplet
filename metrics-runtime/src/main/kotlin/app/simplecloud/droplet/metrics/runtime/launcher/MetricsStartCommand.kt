@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.defaultLazy
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.boolean
+import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.path
 import java.nio.file.Files
@@ -52,6 +53,9 @@ class MetricsStartCommand(
     private val trackMetrics: Boolean by option(help = "Track metrics", envvar = "TRACK_METRICS")
         .boolean()
         .default(true)
+
+    val authType: AuthType by option(help = "Auth type (default: SECRET)", envvar = "AUTH_TYPE").enum<AuthType>()
+        .default(AuthType.SECRET)
 
     override suspend fun run() {
         if (trackMetrics) {

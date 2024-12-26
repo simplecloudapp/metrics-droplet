@@ -3,6 +3,7 @@ package app.simplecloud.droplet.metrics.runtime
 import app.simplecloud.droplet.api.auth.AuthCallCredentials
 import app.simplecloud.droplet.api.auth.AuthSecretInterceptor
 import app.simplecloud.droplet.metrics.runtime.database.DatabaseFactory
+import app.simplecloud.droplet.metrics.runtime.launcher.AuthType
 import app.simplecloud.droplet.metrics.runtime.launcher.MetricsStartCommand
 import app.simplecloud.droplet.metrics.runtime.metrics.MetricsRepository
 import app.simplecloud.droplet.metrics.runtime.metrics.MetricsService
@@ -24,6 +25,13 @@ class MetricsRuntime(
 ) {
 
     private val logger = LogManager.getLogger(MetricsRuntime::class.java)
+
+    private val interceptor = if (metricsStartCommand.authType == AuthType.AUTH_SERVER) {
+        AuthSecretInterceptor(metricsStartCommand.controllerGrpcHost, metricsStartCommand.authorizationPort)
+    } else {
+        StandaloneAuthSecretInterceptor(metricsStartCommand.authSecret)
+    }
+
     private val authCallCredentials = AuthCallCredentials(metricsStartCommand.authSecret)
     private val database = DatabaseFactory.createDatabase(metricsStartCommand.databaseUrl)
 
@@ -62,6 +70,10 @@ class MetricsRuntime(
     }
 
     private fun attach() {
+        if (metricsStartCommand.authType != AuthType.AUTH_SERVER) {
+            return
+        }
+
         logger.info("Attaching to controller...")
         val attacher =
             Attacher(metricsStartCommand, controllerChannel, controllerDropletStub)
