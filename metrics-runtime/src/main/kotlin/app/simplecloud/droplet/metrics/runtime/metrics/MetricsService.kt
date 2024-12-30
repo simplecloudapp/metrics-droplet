@@ -12,7 +12,8 @@ class MetricsService(
         val metrics = repository.getMetrics(
             request.metricTypesList.toSet(),
             getFrom(request),
-            getTo(request)
+            getTo(request),
+            request.step
         )
         return getMetricsResponse {
             this.metrics.addAll(metrics)
