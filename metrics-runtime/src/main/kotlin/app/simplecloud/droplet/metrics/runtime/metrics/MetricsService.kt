@@ -13,7 +13,8 @@ class MetricsService(
             request.metricTypesList.toSet(),
             getFrom(request),
             getTo(request),
-            request.step
+            request.step,
+            request.metaFiltersList?: emptyList()
         )
         return getMetricsResponse {
             this.metrics.addAll(metrics)

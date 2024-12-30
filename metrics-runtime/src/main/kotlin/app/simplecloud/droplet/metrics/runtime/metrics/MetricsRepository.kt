@@ -5,6 +5,7 @@ import app.simplecloud.droplet.metrics.runtime.database.Database
 import app.simplecloud.droplet.metrics.runtime.db.tables.references.METRICS
 import app.simplecloud.droplet.metrics.runtime.db.tables.references.METRICS_META
 import build.buf.gen.simplecloud.metrics.v1.Metric
+import build.buf.gen.simplecloud.metrics.v1.MetricRequestMetaFilter
 import build.buf.gen.simplecloud.metrics.v1.MetricRequestStep
 import build.buf.gen.simplecloud.metrics.v1.metric
 import build.buf.gen.simplecloud.metrics.v1.metricMeta
@@ -79,7 +80,8 @@ class MetricsRepository(
         metricTypes: Set<String>,
         from: LocalDateTime?,
         to: LocalDateTime?,
-        step: MetricRequestStep?
+        step: MetricRequestStep?,
+        metaFilters: List<MetricRequestMetaFilter>
     ): List<Metric> {
         val fromToMessage = "from ${from?.toString() ?: "-1"} to ${to?.toString() ?: "-1"}"
         if (metricTypes.isEmpty()) {
@@ -106,8 +108,20 @@ class MetricsRepository(
             METRICS.TIME.lessOrEqual(to)
         }
 
-        val query = when (step) {
-            MetricRequestStep.HOURLY, MetricRequestStep.DAILY, MetricRequestStep.MONTHLY -> database.context
+        // Build meta filter condition
+        val metaFilterCondition = MetricMetaFilterBuilder.buildMetaFilterCondition(metaFilters)
+
+        // Build the query directly since we handle all possible step values the same way
+        val baseQuery = if (metaFilters.isNotEmpty()) {
+            // When we have meta filters, we need to first filter the metrics
+            // using a subquery to get the correct metric IDs
+            val filteredMetricIds = database.context
+                .select(METRICS_META.METRIC_UNIQUE_ID)
+                .from(METRICS_META)
+                .where(metaFilterCondition)
+                .groupBy(METRICS_META.METRIC_UNIQUE_ID)
+
+            database.context
                 .select(
                     METRICS.METRIC_TYPE,
                     METRICS.METRIC_VALUE,
@@ -117,44 +131,89 @@ class MetricsRepository(
                     METRICS_META.DATA_VALUE
                 )
                 .from(METRICS)
-                .join(METRICS_META)
+                .leftJoin(METRICS_META)
                 .on(METRICS_META.METRIC_UNIQUE_ID.eq(METRICS.UNIQUE_ID))
-                .where(whereCondition)
+                .where(METRICS.UNIQUE_ID.`in`(filteredMetricIds))
+                .and(whereCondition)
                 .and(fromCondition)
                 .and(toCondition)
-                .orderBy(METRICS.TIME)
-
-            else -> database.context
-                .select()
+        } else {
+            database.context
+                .select(
+                    METRICS.METRIC_TYPE,
+                    METRICS.METRIC_VALUE,
+                    METRICS.TIME,
+                    METRICS.UNIQUE_ID,
+                    METRICS_META.DATA_NAME,
+                    METRICS_META.DATA_VALUE
+                )
                 .from(METRICS)
-                .join(METRICS_META)
+                .leftJoin(METRICS_META)
                 .on(METRICS_META.METRIC_UNIQUE_ID.eq(METRICS.UNIQUE_ID))
                 .where(whereCondition)
                 .and(fromCondition)
                 .and(toCondition)
         }
 
-        println(query.sql)
+        val query = baseQuery.orderBy(METRICS.TIME)
 
         val records = query
             .asFlow()
             .toCollection(mutableListOf())
 
         return when (step) {
-            MetricRequestStep.HOURLY -> {
+            MetricRequestStep.MINUTELY -> {
                 records.groupBy { record ->
                     val time = record.get(METRICS.TIME)!!
-                    "${record.get(METRICS.METRIC_TYPE)}_${time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HH"))}"
-                }.map { (_, groupRecords) ->
+                    Pair(
+                        record.get(METRICS.METRIC_TYPE),
+                        time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
+                    )
+                }.map { (groupKey, groupRecords) ->
                     val firstRecord = groupRecords.first()
                     val maxValue = groupRecords.map { it.get(METRICS.METRIC_VALUE)!!.toLong() }.max()
-                    val metaData = groupRecords.associate {
-                        it.get(METRICS_META.DATA_NAME) to it.get(METRICS_META.DATA_VALUE)
-                    }
+
+                    val metaData = groupRecords
+                        .filter { it.get(METRICS_META.DATA_NAME) != null }
+                        .groupBy { it.get(METRICS_META.DATA_NAME) }
+                        .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
 
                     metric {
                         uniqueId = UUID.randomUUID().toString()
-                        metricType = firstRecord.get(METRICS.METRIC_TYPE)!!
+                        metricType = groupKey.first!!
+                        metricValue = maxValue
+                        time = ProtobufTimestamp.fromLocalDateTime(
+                            firstRecord.get(METRICS.TIME)!!.withSecond(0).withNano(0)
+                        )
+                        meta.addAll(metaData.map { (dataName, dataValue) ->
+                            metricMeta {
+                                this.dataName = dataName!!
+                                this.dataValue = dataValue!!
+                            }
+                        })
+                    }
+                }
+            }
+
+            MetricRequestStep.HOURLY -> {
+                records.groupBy { record ->
+                    val time = record.get(METRICS.TIME)!!
+                    Pair(
+                        record.get(METRICS.METRIC_TYPE),
+                        time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HH"))
+                    )
+                }.map { (groupKey, groupRecords) ->
+                    val firstRecord = groupRecords.first()
+                    val maxValue = groupRecords.map { it.get(METRICS.METRIC_VALUE)!!.toLong() }.max()
+
+                    val metaData = groupRecords
+                        .filter { it.get(METRICS_META.DATA_NAME) != null }
+                        .groupBy { it.get(METRICS_META.DATA_NAME) }
+                        .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
+
+                    metric {
+                        uniqueId = UUID.randomUUID().toString()
+                        metricType = groupKey.first!!
                         metricValue = maxValue
                         time = ProtobufTimestamp.fromLocalDateTime(
                             firstRecord.get(METRICS.TIME)!!.withMinute(0).withSecond(0).withNano(0)
@@ -172,17 +231,22 @@ class MetricsRepository(
             MetricRequestStep.DAILY -> {
                 records.groupBy { record ->
                     val time = record.get(METRICS.TIME)!!
-                    "${record.get(METRICS.METRIC_TYPE)}_${time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))}"
-                }.map { (_, groupRecords) ->
+                    Pair(
+                        record.get(METRICS.METRIC_TYPE),
+                        time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+                    )
+                }.map { (groupKey, groupRecords) ->
                     val firstRecord = groupRecords.first()
                     val maxValue = groupRecords.map { it.get(METRICS.METRIC_VALUE)!!.toLong() }.max()
-                    val metaData = groupRecords.associate {
-                        it.get(METRICS_META.DATA_NAME) to it.get(METRICS_META.DATA_VALUE)
-                    }
+
+                    val metaData = groupRecords
+                        .filter { it.get(METRICS_META.DATA_NAME) != null }
+                        .groupBy { it.get(METRICS_META.DATA_NAME) }
+                        .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
 
                     metric {
                         uniqueId = UUID.randomUUID().toString()
-                        metricType = firstRecord.get(METRICS.METRIC_TYPE)!!
+                        metricType = groupKey.first!!
                         metricValue = maxValue
                         time = ProtobufTimestamp.fromLocalDateTime(
                             firstRecord.get(METRICS.TIME)!!.withHour(0).withMinute(0).withSecond(0).withNano(0)
@@ -200,17 +264,22 @@ class MetricsRepository(
             MetricRequestStep.MONTHLY -> {
                 records.groupBy { record ->
                     val time = record.get(METRICS.TIME)!!
-                    "${record.get(METRICS.METRIC_TYPE)}_${time.format(DateTimeFormatter.ofPattern("yyyy-MM"))}"
-                }.map { (_, groupRecords) ->
+                    Pair(
+                        record.get(METRICS.METRIC_TYPE),
+                        time.format(DateTimeFormatter.ofPattern("yyyy-MM"))
+                    )
+                }.map { (groupKey, groupRecords) ->
                     val firstRecord = groupRecords.first()
                     val maxValue = groupRecords.map { it.get(METRICS.METRIC_VALUE)!!.toLong() }.max()
-                    val metaData = groupRecords.associate {
-                        it.get(METRICS_META.DATA_NAME) to it.get(METRICS_META.DATA_VALUE)
-                    }
+
+                    val metaData = groupRecords
+                        .filter { it.get(METRICS_META.DATA_NAME) != null }
+                        .groupBy { it.get(METRICS_META.DATA_NAME) }
+                        .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
 
                     metric {
                         uniqueId = UUID.randomUUID().toString()
-                        metricType = firstRecord.get(METRICS.METRIC_TYPE)!!
+                        metricType = groupKey.first!!
                         metricValue = maxValue
                         time = ProtobufTimestamp.fromLocalDateTime(
                             firstRecord.get(METRICS.TIME)!!.withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0)
@@ -226,11 +295,14 @@ class MetricsRepository(
                 }
             }
 
-            else -> records.groupBy { it.get(METRICS.UNIQUE_ID) }.map { (_, groupRecords) ->
+            MetricRequestStep.UNRECOGNIZED, MetricRequestStep.UNKNOWN_STEP, null -> records.groupBy {
+                it.get(METRICS.UNIQUE_ID)
+            }.map { (_, groupRecords) ->
                 val firstRecord = groupRecords.first()
-                val metaData = groupRecords.associate {
-                    it.get(METRICS_META.DATA_NAME) to it.get(METRICS_META.DATA_VALUE)
-                }
+                val metaData = groupRecords
+                    .filter { it.get(METRICS_META.DATA_NAME) != null }
+                    .groupBy { it.get(METRICS_META.DATA_NAME) }
+                    .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
 
                 metric {
                     uniqueId = firstRecord.get(METRICS.UNIQUE_ID)!!
@@ -245,7 +317,6 @@ class MetricsRepository(
                     })
                 }
             }
-
         }
     }
 
