@@ -4,18 +4,15 @@ import app.simplecloud.droplet.api.time.ProtobufTimestamp
 import app.simplecloud.droplet.metrics.runtime.database.Database
 import app.simplecloud.droplet.metrics.runtime.db.tables.references.METRICS
 import app.simplecloud.droplet.metrics.runtime.db.tables.references.METRICS_META
-import build.buf.gen.simplecloud.metrics.v1.Metric
-import build.buf.gen.simplecloud.metrics.v1.MetricRequestMetaFilter
-import build.buf.gen.simplecloud.metrics.v1.MetricRequestStep
-import build.buf.gen.simplecloud.metrics.v1.metric
-import build.buf.gen.simplecloud.metrics.v1.metricMeta
+import build.buf.gen.simplecloud.metrics.v1.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.toCollection
-import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.withContext
 import org.apache.logging.log4j.LogManager
+import org.jooq.impl.DSL
+import java.time.Duration
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import org.jooq.Record6
+import org.jooq.SelectConnectByStep
 import java.util.*
 
 class MetricsRepository(
@@ -23,6 +20,7 @@ class MetricsRepository(
 ) {
 
     private val logger = LogManager.getLogger(MetricsRepository::class.java)
+    private val cacheManager = MetricsCacheManager()
 
     suspend fun saveMetric(metric: Metric) = withContext(Dispatchers.IO) {
         val uniqueId = UUID.randomUUID().toString()
@@ -66,7 +64,7 @@ class MetricsRepository(
             }
         }
 
-        logger.info("Saved metric ${metric.uniqueId} of type ${metric.metricType} with value ${metric.metricValue}")
+        logger.info("Saved metric ${uniqueId} of type ${metric.metricType} with value ${metric.metricValue}")
     }
 
     /**
@@ -84,43 +82,78 @@ class MetricsRepository(
         metaFilters: List<MetricRequestMetaFilter>
     ): List<Metric> {
         val fromToMessage = "from ${from?.toString() ?: "-1"} to ${to?.toString() ?: "-1"}"
-        if (metricTypes.isEmpty()) {
-            logger.info("Getting all metrics $fromToMessage")
-        } else {
-            logger.info("Getting metrics of type ${metricTypes.joinToString()} $fromToMessage")
+        logger.info("Getting metrics${if (metricTypes.isEmpty()) " all" else " of type ${metricTypes.joinToString()}"} $fromToMessage")
+
+        return cacheManager.getOrLoadMetrics(
+            metricTypes = metricTypes,
+            from = from,
+            to = to,
+            step = step,
+            metaFilters = metaFilters
+        ) {
+            // This is the loader function that will be called on cache miss
+            val timeWindow = calculateTimeWindow(from, to, step)
+            val baseQuery = buildBaseQuery(metricTypes, from, to, metaFilters)
+
+            when {
+                timeWindow != null -> aggregateMetricsWithWindow(baseQuery, timeWindow)
+                else -> aggregateMetricsWithoutWindow(baseQuery)
+            }
+        }
+    }
+
+    private data class TimeWindow(
+        val interval: String,
+        val formatPattern: String
+    )
+
+    private fun calculateTimeWindow(from: LocalDateTime?, to: LocalDateTime?, step: MetricRequestStep?): TimeWindow? {
+        if (step == null || step in setOf(MetricRequestStep.UNRECOGNIZED, MetricRequestStep.UNKNOWN_STEP)) {
+            return null
         }
 
-        val whereCondition = if (metricTypes.isEmpty()) {
-            METRICS.METRIC_TYPE.isNotNull()
-        } else {
-            METRICS.METRIC_TYPE.`in`(metricTypes)
+        val duration = Duration.between(from ?: LocalDateTime.MIN, to ?: LocalDateTime.now())
+        return when (step) {
+            MetricRequestStep.MINUTELY -> when {
+                duration.toHours() > 24 -> TimeWindow("1 hour", "HH")
+                duration.toHours() > 6 -> TimeWindow("30 minutes", "HH:mm")
+                else -> TimeWindow("1 minute", "HH:mm")
+            }
+            MetricRequestStep.HOURLY -> when {
+                duration.toDays() > 7 -> TimeWindow("6 hours", "yyyy-MM-dd HH")
+                else -> TimeWindow("1 hour", "yyyy-MM-dd HH")
+            }
+            MetricRequestStep.DAILY -> TimeWindow("1 day", "yyyy-MM-dd")
+            MetricRequestStep.MONTHLY -> TimeWindow("1 month", "yyyy-MM")
+            else -> null
         }
+    }
 
-        val fromCondition = if (from == null) {
-            METRICS.TIME.isNotNull()
-        } else {
-            METRICS.TIME.greaterOrEqual(from)
+    private fun buildBaseQuery(
+        metricTypes: Set<String>,
+        from: LocalDateTime?,
+        to: LocalDateTime?,
+        metaFilters: List<MetricRequestMetaFilter>
+    ): SelectConnectByStep<Record6<String?, Int?, LocalDateTime?, String?, String?, String?>> {
+        val conditions = mutableListOf<org.jooq.Condition>()
+
+        if (metricTypes.isNotEmpty()) {
+            conditions.add(METRICS.METRIC_TYPE.`in`(metricTypes))
         }
+        from?.let { conditions.add(METRICS.TIME.greaterOrEqual(it)) }
+        to?.let { conditions.add(METRICS.TIME.lessOrEqual(it)) }
 
-        val toCondition = if (to == null) {
-            METRICS.TIME.isNotNull()
-        } else {
-            METRICS.TIME.lessOrEqual(to)
-        }
+        return if (metaFilters.isNotEmpty()) {
+            val metaFilterCondition = MetricMetaFilterBuilder.buildMetaFilterCondition(metaFilters)
 
-        // Build meta filter condition
-        val metaFilterCondition = MetricMetaFilterBuilder.buildMetaFilterCondition(metaFilters)
-
-        // Build the query directly since we handle all possible step values the same way
-        val baseQuery = if (metaFilters.isNotEmpty()) {
-            // When we have meta filters, we need to first filter the metrics
-            // using a subquery to get the correct metric IDs
+            // First get the filtered metric IDs
             val filteredMetricIds = database.context
                 .select(METRICS_META.METRIC_UNIQUE_ID)
                 .from(METRICS_META)
                 .where(metaFilterCondition)
-                .groupBy(METRICS_META.METRIC_UNIQUE_ID)
+                .asTable("filtered_metrics")
 
+            // Main query with both filtered condition and all meta data
             database.context
                 .select(
                     METRICS.METRIC_TYPE,
@@ -131,13 +164,13 @@ class MetricsRepository(
                     METRICS_META.DATA_VALUE
                 )
                 .from(METRICS)
-                .leftJoin(METRICS_META)
-                .on(METRICS_META.METRIC_UNIQUE_ID.eq(METRICS.UNIQUE_ID))
-                .where(METRICS.UNIQUE_ID.`in`(filteredMetricIds))
-                .and(whereCondition)
-                .and(fromCondition)
-                .and(toCondition)
+                .innerJoin(filteredMetricIds)
+                .on(METRICS.UNIQUE_ID.eq(filteredMetricIds.field(METRICS_META.METRIC_UNIQUE_ID)))
+                .leftJoin(METRICS_META)  // Join again to get all meta data
+                .on(METRICS.UNIQUE_ID.eq(METRICS_META.METRIC_UNIQUE_ID))
+                .where(DSL.and(conditions))
         } else {
+            // Simple query without meta filters
             database.context
                 .select(
                     METRICS.METRIC_TYPE,
@@ -150,174 +183,90 @@ class MetricsRepository(
                 .from(METRICS)
                 .leftJoin(METRICS_META)
                 .on(METRICS_META.METRIC_UNIQUE_ID.eq(METRICS.UNIQUE_ID))
-                .where(whereCondition)
-                .and(fromCondition)
-                .and(toCondition)
+                .where(DSL.and(conditions))
         }
+    }
 
-        val query = baseQuery.orderBy(METRICS.TIME)
+    private suspend fun aggregateMetricsWithWindow(
+        query: SelectConnectByStep<Record6<String?, Int?, LocalDateTime?, String?, String?, String?>>,
+        timeWindow: TimeWindow
+    ): List<Metric> = withContext(Dispatchers.IO) {
+        val records = query.fetch()
 
-        val records = query
-            .asFlow()
-            .toCollection(mutableListOf())
-
-        return when (step) {
-            MetricRequestStep.MINUTELY -> {
-                records.groupBy { record ->
-                    val time = record.get(METRICS.TIME)!!
-                    Pair(
-                        record.get(METRICS.METRIC_TYPE),
-                        time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
-                    )
-                }.map { (groupKey, groupRecords) ->
-                    val firstRecord = groupRecords.first()
-                    val maxValue = groupRecords.map { it.get(METRICS.METRIC_VALUE)!!.toLong() }.max()
-
-                    val metaData = groupRecords
-                        .filter { it.get(METRICS_META.DATA_NAME) != null }
-                        .groupBy { it.get(METRICS_META.DATA_NAME) }
-                        .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
-
-                    metric {
-                        uniqueId = UUID.randomUUID().toString()
-                        metricType = groupKey.first!!
-                        metricValue = maxValue
-                        time = ProtobufTimestamp.fromLocalDateTime(
-                            firstRecord.get(METRICS.TIME)!!.withSecond(0).withNano(0)
-                        )
-                        meta.addAll(metaData.map { (dataName, dataValue) ->
-                            metricMeta {
-                                this.dataName = dataName!!
-                                this.dataValue = dataValue!!
-                            }
-                        })
-                    }
-                }
+        records.groupBy { record ->
+            // Group by metric type and truncated time based on the window
+            val time = record.get(METRICS.TIME, LocalDateTime::class.java)
+            val truncatedTime = when {
+                timeWindow.interval.contains("hour") -> time.truncatedTo(java.time.temporal.ChronoUnit.HOURS)
+                timeWindow.interval.contains("minute") -> time.truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
+                timeWindow.interval.contains("day") -> time.truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                timeWindow.interval.contains("month") -> time.withDayOfMonth(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                else -> time
             }
+            record.get(METRICS.METRIC_TYPE) to truncatedTime
+        }.map { (groupKey, groupRecords) ->
+            val (metricType, timestamp) = groupKey
 
-            MetricRequestStep.HOURLY -> {
-                records.groupBy { record ->
-                    val time = record.get(METRICS.TIME)!!
-                    Pair(
-                        record.get(METRICS.METRIC_TYPE),
-                        time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HH"))
-                    )
-                }.map { (groupKey, groupRecords) ->
-                    val firstRecord = groupRecords.first()
-                    val maxValue = groupRecords.map { it.get(METRICS.METRIC_VALUE)!!.toLong() }.max()
-
-                    val metaData = groupRecords
-                        .filter { it.get(METRICS_META.DATA_NAME) != null }
-                        .groupBy { it.get(METRICS_META.DATA_NAME) }
-                        .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
-
-                    metric {
-                        uniqueId = UUID.randomUUID().toString()
-                        metricType = groupKey.first!!
-                        metricValue = maxValue
-                        time = ProtobufTimestamp.fromLocalDateTime(
-                            firstRecord.get(METRICS.TIME)!!.withMinute(0).withSecond(0).withNano(0)
-                        )
-                        meta.addAll(metaData.map { (dataName, dataValue) ->
-                            metricMeta {
-                                this.dataName = dataName!!
-                                this.dataValue = dataValue!!
-                            }
-                        })
-                    }
+            Metric.newBuilder().apply {
+                uniqueId = UUID.randomUUID().toString()
+                this.metricType = metricType
+                metricValue = groupRecords.maxOf {
+                    it.get(METRICS.METRIC_VALUE, Int::class.java).toLong()
                 }
-            }
+                time = ProtobufTimestamp.fromLocalDateTime(timestamp)
 
-            MetricRequestStep.DAILY -> {
-                records.groupBy { record ->
-                    val time = record.get(METRICS.TIME)!!
-                    Pair(
-                        record.get(METRICS.METRIC_TYPE),
-                        time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-                    )
-                }.map { (groupKey, groupRecords) ->
-                    val firstRecord = groupRecords.first()
-                    val maxValue = groupRecords.map { it.get(METRICS.METRIC_VALUE)!!.toLong() }.max()
-
-                    val metaData = groupRecords
-                        .filter { it.get(METRICS_META.DATA_NAME) != null }
-                        .groupBy { it.get(METRICS_META.DATA_NAME) }
-                        .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
-
-                    metric {
-                        uniqueId = UUID.randomUUID().toString()
-                        metricType = groupKey.first!!
-                        metricValue = maxValue
-                        time = ProtobufTimestamp.fromLocalDateTime(
-                            firstRecord.get(METRICS.TIME)!!.withHour(0).withMinute(0).withSecond(0).withNano(0)
-                        )
-                        meta.addAll(metaData.map { (dataName, dataValue) ->
-                            metricMeta {
-                                this.dataName = dataName!!
-                                this.dataValue = dataValue!!
-                            }
-                        })
+                // Collect unique meta entries
+                val metaEntries = groupRecords
+                    .mapNotNull { record ->
+                        val dataName = record.get(METRICS_META.DATA_NAME, String::class.java)
+                        val dataValue = record.get(METRICS_META.DATA_VALUE, String::class.java)
+                        if (!dataName.isNullOrEmpty() && !dataValue.isNullOrEmpty()) {
+                            MetricMeta.newBuilder()
+                                .setDataName(dataName)
+                                .setDataValue(dataValue)
+                                .build()
+                        } else null
                     }
-                }
-            }
+                    .distinctBy { it.dataName }
 
-            MetricRequestStep.MONTHLY -> {
-                records.groupBy { record ->
-                    val time = record.get(METRICS.TIME)!!
-                    Pair(
-                        record.get(METRICS.METRIC_TYPE),
-                        time.format(DateTimeFormatter.ofPattern("yyyy-MM"))
+                addAllMeta(metaEntries)
+            }.build()
+        }.sortedBy { it.time.seconds }
+    }
+
+    private suspend fun aggregateMetricsWithoutWindow(
+        query: SelectConnectByStep<Record6<String?, Int?, LocalDateTime?, String?, String?, String?>>
+    ): List<Metric> = withContext(Dispatchers.IO) {
+        query.fetch()
+            .groupBy { it.get(METRICS.UNIQUE_ID) }
+            .map { (_, records) ->
+                val record = records.first()
+
+                Metric.newBuilder().apply {
+                    uniqueId = record.get(METRICS.UNIQUE_ID, String::class.java)
+                    metricType = record.get(METRICS.METRIC_TYPE, String::class.java)
+                    metricValue = record.get(METRICS.METRIC_VALUE, Int::class.java).toLong()
+                    time = ProtobufTimestamp.fromLocalDateTime(
+                        record.get(METRICS.TIME, LocalDateTime::class.java)
                     )
-                }.map { (groupKey, groupRecords) ->
-                    val firstRecord = groupRecords.first()
-                    val maxValue = groupRecords.map { it.get(METRICS.METRIC_VALUE)!!.toLong() }.max()
 
-                    val metaData = groupRecords
-                        .filter { it.get(METRICS_META.DATA_NAME) != null }
-                        .groupBy { it.get(METRICS_META.DATA_NAME) }
-                        .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
-
-                    metric {
-                        uniqueId = UUID.randomUUID().toString()
-                        metricType = groupKey.first!!
-                        metricValue = maxValue
-                        time = ProtobufTimestamp.fromLocalDateTime(
-                            firstRecord.get(METRICS.TIME)!!.withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0)
-                                .withNano(0)
-                        )
-                        meta.addAll(metaData.map { (dataName, dataValue) ->
-                            metricMeta {
-                                this.dataName = dataName!!
-                                this.dataValue = dataValue!!
-                            }
-                        })
-                    }
-                }
-            }
-
-            MetricRequestStep.UNRECOGNIZED, MetricRequestStep.UNKNOWN_STEP, null -> records.groupBy {
-                it.get(METRICS.UNIQUE_ID)
-            }.map { (_, groupRecords) ->
-                val firstRecord = groupRecords.first()
-                val metaData = groupRecords
-                    .filter { it.get(METRICS_META.DATA_NAME) != null }
-                    .groupBy { it.get(METRICS_META.DATA_NAME) }
-                    .mapValues { (_, values) -> values.first().get(METRICS_META.DATA_VALUE) }
-
-                metric {
-                    uniqueId = firstRecord.get(METRICS.UNIQUE_ID)!!
-                    metricType = firstRecord.get(METRICS.METRIC_TYPE)!!
-                    metricValue = firstRecord.get(METRICS.METRIC_VALUE)!!.toLong()
-                    time = ProtobufTimestamp.fromLocalDateTime(firstRecord.get(METRICS.TIME)!!)
-                    meta.addAll(metaData.map { (dataName, dataValue) ->
-                        metricMeta {
-                            this.dataName = dataName!!
-                            this.dataValue = dataValue!!
+                    // Collect unique meta entries
+                    val metaEntries = records
+                        .mapNotNull { r ->
+                            val dataName = r.get(METRICS_META.DATA_NAME, String::class.java)
+                            val dataValue = r.get(METRICS_META.DATA_VALUE, String::class.java)
+                            if (!dataName.isNullOrEmpty() && !dataValue.isNullOrEmpty()) {
+                                MetricMeta.newBuilder()
+                                    .setDataName(dataName)
+                                    .setDataValue(dataValue)
+                                    .build()
+                            } else null
                         }
-                    })
-                }
+                        .distinctBy { it.dataName }
+
+                    addAllMeta(metaEntries)
+                }.build()
             }
-        }
     }
 
 }
