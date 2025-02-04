@@ -76,7 +76,6 @@ subprojects {
         }
     }
 
-
     centralPortal {
         name = project.name
 
@@ -84,9 +83,9 @@ subprojects {
         password = project.findProperty("sonatypePassword") as? String
 
         pom {
-            name.set("Metrics Droplet")
-            description.set("Keep track of your metrics")
-            url.set("https://github.com/theSimpleCloud/metrics-droplet")
+            name.set("SimpleCloud Metrics Droplet")
+            description.set("The Metrics Droplet is a specialized SimpleCloud service component that collects, processes, and exposes vital performance metrics from your cloud infrastructure")
+            url.set("https://github.com/simplecloudapp/metrics-droplet")
 
             developers {
                 developer {
@@ -101,8 +100,8 @@ subprojects {
                 }
             }
             scm {
-                url.set("https://github.com/theSimpleCloud/metrics-droplet.git")
-                connection.set("git:git@github.com:theSimpleCloud/metrics-droplet.git")
+                url.set("https://github.com/simplecloudapp/metrics-droplet.git")
+                connection.set("git:git@github.com:simplecloudapp/metrics-droplet.git")
             }
         }
     }

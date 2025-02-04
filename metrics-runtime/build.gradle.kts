@@ -6,14 +6,16 @@ plugins {
 dependencies {
     api(project(":metrics-shared"))
     api(rootProject.libs.kotlin.coroutines)
+    api(rootProject.libs.bundles.jooq)
+    api(rootProject.libs.sqlite.jdbc)
+
     implementation(rootProject.libs.simplecloud.droplet.api)
     implementation(rootProject.libs.simplecloud.pubsub)
     implementation(rootProject.libs.simplecloud.metrics)
     implementation(rootProject.libs.bundles.proto)
     implementation(rootProject.libs.bundles.log4j)
     implementation(rootProject.libs.clikt)
-    api(rootProject.libs.bundles.jooq)
-    api(rootProject.libs.sqlite.jdbc)
+
     jooqCodegen(rootProject.libs.jooq.meta.extensions)
 }
 
