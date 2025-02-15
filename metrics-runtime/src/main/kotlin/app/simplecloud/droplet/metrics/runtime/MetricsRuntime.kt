@@ -5,8 +5,9 @@ import app.simplecloud.droplet.api.auth.AuthSecretInterceptor
 import app.simplecloud.droplet.metrics.runtime.database.DatabaseFactory
 import app.simplecloud.droplet.metrics.runtime.launcher.AuthType
 import app.simplecloud.droplet.metrics.runtime.launcher.MetricsStartCommand
-import app.simplecloud.droplet.metrics.runtime.metrics.MetricsRepository
-import app.simplecloud.droplet.metrics.runtime.metrics.MetricsService
+import app.simplecloud.droplet.metrics.runtime.metrics.MetricsRegistry
+import app.simplecloud.droplet.metrics.runtime.metrics.service.MetricsRepository
+import app.simplecloud.droplet.metrics.runtime.metrics.service.MetricsService
 import app.simplecloud.droplet.metrics.shared.MetricsEventNames
 import app.simplecloud.pubsub.PubSubClient
 import build.buf.gen.simplecloud.controller.v1.ControllerDropletServiceGrpcKt
@@ -16,9 +17,12 @@ import io.grpc.Server
 import io.grpc.ServerBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.apache.logging.log4j.LogManager
+import java.time.Duration
 
 class MetricsRuntime(
     private val metricsStartCommand: MetricsStartCommand
@@ -56,6 +60,7 @@ class MetricsRuntime(
         logger.info("Starting metrics runtime")
         setupDatabase()
         startGrpcServer()
+        startMetricsLogging()
         attach()
         subscribeToMetricsEvents()
 
@@ -116,6 +121,20 @@ class MetricsRuntime(
                 )
             )
             .build()
+    }
+
+    private fun startMetricsLogging() {
+        CoroutineScope(Dispatchers.Default).launch {
+            while (isActive) {
+                try {
+                    val metricsText = MetricsRegistry.getMetricsText()
+                    logger.info("Current Metrics:\n$metricsText")
+                } catch (e: Exception) {
+                    logger.error("Error logging metrics", e)
+                }
+                delay(Duration.ofMinutes(1).toMillis())
+            }
+        }
     }
 
 }

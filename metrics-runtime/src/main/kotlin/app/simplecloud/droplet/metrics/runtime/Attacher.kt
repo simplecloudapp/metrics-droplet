@@ -22,7 +22,7 @@ class Attacher(
                 RegisterDropletRequest.newBuilder().setDefinition(
                     Droplet(
                         type = "metrics",
-                        id = "metrics-1",
+                        id = metricsStartCommand.dropletId,
                         host = metricsStartCommand.grpcHost,
                         port = metricsStartCommand.grpcPort,
                         envoyPort = 8082

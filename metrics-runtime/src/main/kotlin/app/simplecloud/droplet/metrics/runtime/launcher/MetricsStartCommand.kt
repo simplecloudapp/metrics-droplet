@@ -31,6 +31,8 @@ class MetricsStartCommand(
     val databaseUrl: String by option(help = "Database URL (default: ${defaultDatabaseUrl})", envvar = "DATABASE_URL")
         .default(defaultDatabaseUrl)
 
+    val dropletId: String by option(help = "Droplet ID (default: internal-metrics)", envvar = "DROPLET_ID").default("internal-metrics")
+
     val grpcHost: String by option(help = "Grpc host (default: 127.0.0.1)", envvar = "GRPC_HOST").default("127.0.0.1")
     val grpcPort: Int by option(help = "Grpc port (default: 5836)", envvar = "GRPC_PORT").int().default(5836)
 

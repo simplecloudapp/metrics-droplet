@@ -23,6 +23,10 @@ application {
     mainClass = "app.simplecloud.droplet.metrics.runtime.launcher.LauncherKt"
 }
 
+tasks.named("compileKotlin") {
+    dependsOn(tasks.jooqCodegen)
+}
+
 sourceSets {
     main {
         java {
