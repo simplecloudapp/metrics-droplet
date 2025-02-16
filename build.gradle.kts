@@ -9,7 +9,7 @@ plugins {
 }
 
 allprojects {
-    group = "app.simplecloud.droplet"
+    group = "app.simplecloud.droplet.metrics"
     version = determineVersion()
 
     repositories {
