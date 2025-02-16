@@ -14,7 +14,7 @@ commons-io = "2.15.1"
 clikt = "5.0.1"
 jooq = "3.19.3"
 sqlite-jdbc = "3.44.1.0"
-sonatype-central-portal-publisher = "1.2.3"
+sonatype-central-portal-publisher = "1.2.4"
 
 [libraries]
 kotlin-jvm = { module = "org.jetbrains.kotlin:kotlin-stdlib-jdk8", version.ref = "kotlin" }
